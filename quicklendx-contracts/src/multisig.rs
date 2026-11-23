@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, BytesN, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 #[contracterror]
@@ -161,9 +161,15 @@ impl MultisigContract {
         new_owners: Vec<BytesN<32>>,
         new_threshold: u32,
     ) -> Result<(), MultisigError> {
+        if new_threshold == 0 || new_threshold >= new_owners.len() { return Err(MultisigError::InvalidThreshold); }
+        // Bind the consumed approval to the exact signer set and threshold; an
+        // unrelated approved operation must never authorize arbitrary rotation.
+        let mut payload = new_owners.to_xdr(&env);
+        payload.append(&Bytes::from_slice(&env, &new_threshold.to_be_bytes()));
+        let expected_hash = env.crypto().sha256(&payload);
+        if expected_hash != operation_hash { return Err(MultisigError::OperationNotFound); }
         let op: MultisigOperation = env.storage().persistent().get(&operation_key(&operation_hash)).ok_or(MultisigError::OperationNotFound)?;
         if !op.executed { return Err(MultisigError::NotEnoughSignatures); }
-        if new_threshold == 0 || new_threshold >= new_owners.len() { return Err(MultisigError::InvalidThreshold); }
         env.storage().instance().set(&OWNERS_KEY, &new_owners);
         env.storage().instance().set(&THRESHOLD_KEY, &new_threshold);
         Ok(())
